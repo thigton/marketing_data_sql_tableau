@@ -1,0 +1,194 @@
+-- Create tables
+CREATE TABLE marketing (
+  date VARCHAR(20),
+  marketing_spend VARCHAR(20),
+  promo VARCHAR(20),
+  PRIMARY KEY (date)
+);
+
+-- Create revenue table
+CREATE TABLE revenue_tbl (
+date VARCHAR(20),
+week_id VARCHAR(20),
+month_Number VARCHAR(20),
+month_id VARCHAR(20),
+year VARCHAR(20),
+day_name VARCHAR(20),
+revenue VARCHAR(20),
+PRIMARY KEY (date)
+);
+
+CREATE TABLE revenue_tbl2 (
+date VARCHAR(20),
+week_id VARCHAR(20),
+month_Number VARCHAR(20),
+month_id VARCHAR(20),
+year VARCHAR(20),
+day_name VARCHAR(20),
+revenue VARCHAR(20),
+PRIMARY KEY (date)	
+);
+
+-- visitors table
+CREATE TABLE visitor_tbl (
+date VARCHAR(20),
+visitors VARCHAR(20),
+PRIMARY KEY (date)
+);
+
+--Load in data
+ --command " "\\copy public.marketing (date, marketing_spend, promo) FROM '/datascientisttaskfiles/Marketing Data.csv' DELIMITER ',' CSV HEADER QUOTE '\"' NULL 'NULL' ESCAPE '''';""
+ --command " "\\copy public.revenue_tbl (date, week_id, month_number, month_id, year, day_name, revenue) FROM 'datascientisttaskfiles/Revenue Data 1.csv' DELIMITER ',' CSV HEADER QUOTE '\"' NULL 'NULL' ESCAPE '''';""
+--command " "\\copy public.revenue_tbl2 (date, week_id, month_number, month_id, year, day_name, revenue) FROM 'datascientisttaskfiles/Revenue Data 1.csv' DELIMITER ',' CSV HEADER QUOTE '\"' NULL 'NULL' ESCAPE '''';""
+--command " "\\copy public.visitor_tbl (date, visitors) FROM 'datascientisttaskfiles/Visitors Data.csv' DELIMITER ',' CSV HEADER QUOTE '\"' NULL 'NULL' ESCAPE '''';""
+
+-- convert data types, make blank strings null
+-- marketing
+BEGIN;
+UPDATE marketing SET marketing_spend=NULL WHERE marketing_spend='';
+UPDATE marketing SET promo=NULL WHERE promo='';
+ALTER TABLE marketing
+ALTER COLUMN date TYPE DATE 
+		USING to_date(date, 'dd/mm/yyyy'),
+ALTER COLUMN marketing_spend TYPE float8
+		USING marketing_spend::float8;
+COMMIT;
+
+-- revenue
+
+BEGIN;
+DELETE FROM revenue_tbl WHERE revenue = '';
+DELETE FROM revenue_tbl2 WHERE revenue = '';
+INSERT INTO revenue_tbl 
+SELECT * from revenue_tbl2;
+DROP TABLE revenue_tbl2;
+UPDATE revenue_tbl SET date=NULL WHERE date='';
+UPDATE revenue_tbl SET date=NULL WHERE date='';
+UPDATE revenue_tbl SET week_id=NULL WHERE week_id='';
+UPDATE revenue_tbl SET month_number=NULL WHERE month_number='';
+UPDATE revenue_tbl SET month_id=NULL WHERE month_id='';
+UPDATE revenue_tbl SET year=NULL WHERE year='';
+UPDATE revenue_tbl SET day_name=NULL WHERE day_name='';
+UPDATE revenue_tbl SET revenue=NULL WHERE revenue='';
+ALTER TABLE revenue_tbl
+ALTER COLUMN date TYPE DATE 
+		USING to_date(date, 'dd/mm/yyyy'),
+ALTER COLUMN revenue TYPE float8
+		USING revenue::float8,
+ALTER COLUMN week_id TYPE int
+		USING week_id::int,
+ALTER COLUMN month_id TYPE int
+		USING month_id::int,
+ALTER COLUMN month_number TYPE int
+		USING month_number::int,
+ALTER COLUMN year TYPE int
+		USING year::int;
+COMMIT;
+
+-- visitors
+BEGIN;
+UPDATE visitor_tbl SET date=NULL WHERE date='';
+UPDATE visitor_tbl SET visitors=NULL WHERE visitors='';
+ALTER TABLE visitor_tbl
+ALTER COLUMN date TYPE DATE 
+		USING to_date(date, 'dd/mm/yyyy'),
+ALTER COLUMN visitors TYPE float8
+		USING visitors::float8;
+COMMIT;
+
+-- Join / merge the files together into a single table.
+-- plus fill in missing values in date related columns
+-- month_number: extract from date
+-- month_id: for the values provided day 1 is sunday 15th March 2020, and also at the start of a new year
+-- day_names
+-- month_id: month 1 is Jan 2020.
+
+CREATE VIEW joined_tbl AS
+SELECT ma.date,
+ma.marketing_spend,
+ma.promo,
+(ma.date - to_date('15/03/2020', 'dd/mm/yyyy'))::int/7 + date_part('year', ma.date)::int - 2020 as week_id,
+date_part('month', ma.date) as month_number,
+date_part('month', ma.date) + (date_part('year', ma.date) - 2020) * 12 as month_id,
+date_part('year', ma.date) as year,
+to_char(ma.date, 'Day') as day_name,
+r.revenue,
+v.visitors
+FROM revenue_tbl r 
+FULL OUTER JOIN marketing ma 
+ON ma.date=r.date
+FULL OUTER JOIN visitor_tbl v
+ON ma.date = v.date;
+
+SELECT * FROM joined_tbl;
+-- How much revenue did we generate in total and by campaign?
+SELECT SUM(revenue) AS total_revenue
+FROM joined_tbl;
+
+--by campaign
+CREATE VIEW total_revenue_by_promo AS
+SELECT promo, SUM(revenue) AS total_revenue
+FROM joined_tbl
+WHERE promo IS NOT NULL
+GROUP BY promo
+ORDER BY total_revenue DESC;
+
+SELECT * FROM total_revenue_by_promo;
+-- Which day we had the highest average visitors?
+CREATE VIEW avg_visitors_per_dow AS
+SELECT day_name, AVG(visitors) as average_visitors
+FROM joined_tbl
+WHERE day_name IS NOT NULL
+GROUP BY day_name
+ORDER BY average_visitors DESC;
+
+SELECT * FROM avg_visitors_per_dow;
+
+-- Which promotion costs us the most?
+CREATE VIEW promo_costs AS
+SELECT promo, sum(marketing_spend) as total_spend
+FROM joined_tbl
+WHERE promo IS NOT NULL
+GROUP BY promo
+ORDER BY total_spend DESC;
+
+SELECT * FROM promo_costs;
+-- What is the weekly average revenue, visitors and marketing spend?
+CREATE VIEW weekly_avgs AS
+SELECT week_id,
+		AVG(revenue) as avg_revenue,
+		AVG(visitors) as avg_visitors,
+		AVG(marketing_spend) as avg_spend
+FROM joined_tbl
+GROUP BY week_id
+ORDER BY week_id ASC;
+
+SELECT * FROM weekly_avgs;
+
+
+SELECT
+		AVG(total_revenue) as avg_revenue,
+		AVG(total_visitors) as avg_visitors,
+		AVG(total_spend) as avg_spend
+FROM weekly_totals;
+-- Plot the revenue and cost by week (use Python or other here)
+CREATE VIEW weekly_totals AS
+SELECT week_id,
+		SUM(revenue) as total_revenue,
+		SUM(visitors) as total_visitors,
+		SUM(marketing_spend) as total_spend
+FROM joined_tbl
+GROUP BY week_id
+ORDER BY week_id ASC;
+-- testing area.
+
+SELECT promo,
+(SUM(revenue) / SUM(visitors)) as revenue_per_visitor,
+(SUM(visitors)/SUM(marketing_spend)) as visitor_per_spend
+FROM joined_tbl
+WHERE promo IS NOT NULL
+GROUP BY promo;
+
+
+
+
